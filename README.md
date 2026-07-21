@@ -68,15 +68,20 @@ are skipped (with a printed note) on systems without them.
 
 `fakeroot dpkg-deb`, `debsigs`, `debsig-verify`, `gpg` (tests), `curl`.
 
+## Control fields
+
+`build` writes `Package`, `Version`, `Architecture`, `Maintainer`, `Section`,
+`Priority`, `Homepage`, `Installed-Size`, `Source`, `Suite`, `Codename`,
+`License`, and `Description` unconditionally, plus these when supplied:
+`Vendor`, `Authors`, `Depends`, `Pre-Depends`, `Recommends`, `Suggests`,
+`Conflicts`, `Replaces`, `Provides`.
+
+The optional fields are omitted entirely when unset or empty, rather than
+emitted with a blank value. Relationship fields are joined with `", "`.
+
 ## Known limitation
 
-The control-file template emits a fixed set of properties: `Package`,
-`Version`, `Architecture`, `Maintainer`, `Section`, `Priority`, `Homepage`,
-`Installed-Size`, `Source`, `Suite`, `Codename`, `License`.  `Depends`,
-`Suggests`, `Recommends`, `Pre-Depends`, `Conflicts`, `Replaces`, `Provides`,
-`Vendor`, and `Authors` are accepted on the CLI and validated by
-`verify content`, but are not yet written to `DEBIAN/control` — to be
-addressed in a follow-up.
+`Origin`, `Label`, and `Breaks` are not modelled and cannot be set.
 
 ## License
 
