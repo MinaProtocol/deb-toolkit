@@ -1,0 +1,72 @@
+name: Coverage
+
+# The parent repo (mina-release-toolkit) lists deb-toolkit/ under `ignore`
+# in its own codecov.yml, on the stated assumption that this repo reports
+# coverage from its own CI. This workflow is what makes that true.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  coverage:
+    name: cargo llvm-cov
+    # Pinned to 22.04 for the same reason as ci.yml: the bundled GPG
+    # signing-key fixture under tests/res/ was generated with a digest
+    # algorithm that gpg 2.4 (default on ubuntu-24) rejects. Coverage has
+    # to run the same tests CI runs, so it needs the same runner.
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Without these the integration tests skip themselves (by design —
+      # see README) rather than fail, and every path they exercise —
+      # signer.rs, signature_verifier.rs, viewer.rs, and the packaging
+      # half of builder.rs — would be reported as uncovered. That
+      # understates coverage instead of measuring it, so the coverage job
+      # needs the same tooling as the test job.
+      - name: Install Debian tooling for integration tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends debsigs debsig-verify
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run coverage
+        run: |
+          cargo llvm-cov --all-features --workspace --lcov \
+            --output-path lcov.info
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: lcov.info
+          flags: deb-toolkit
+          name: deb-toolkit
+          # Public-repo PRs can upload without a token, but a token avoids
+          # rate limiting. Set CODECOV_TOKEN in repo secrets if uploads
+          # start getting throttled.
+          token: ${{ secrets.CODECOV_TOKEN }}
+          # Coverage is an observation, not a merge gate — a Codecov
+          # outage must not turn this PR red.
+          fail_ci_if_error: false
