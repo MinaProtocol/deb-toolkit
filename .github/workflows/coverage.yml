@@ -57,16 +57,29 @@ jobs:
           cargo llvm-cov --all-features --workspace --lcov \
             --output-path lcov.info
 
+      # Codecov no longer accepts tokenless uploads: without a token it
+      # returns "Token required - not valid tokenless upload" for every
+      # request. Combined with `fail_ci_if_error: false` below, that would
+      # leave this job permanently green while publishing nothing — the
+      # exact state the sibling crates' coverage jobs in
+      # mina-release-toolkit have been in. Surface it as a warning
+      # annotation so a missing token is visible instead of silent.
+      - name: Warn if the Codecov token is missing
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          if [ -z "$CODECOV_TOKEN" ]; then
+            echo "::warning title=Coverage not published::CODECOV_TOKEN is not set in repository secrets. Codecov rejects tokenless uploads, so the report was generated but will not be published."
+          fi
+
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:
           files: lcov.info
           flags: deb-toolkit
           name: deb-toolkit
-          # Public-repo PRs can upload without a token, but a token avoids
-          # rate limiting. Set CODECOV_TOKEN in repo secrets if uploads
-          # start getting throttled.
           token: ${{ secrets.CODECOV_TOKEN }}
           # Coverage is an observation, not a merge gate — a Codecov
-          # outage must not turn this PR red.
+          # outage must not turn a PR red. The step above is what keeps
+          # that leniency from hiding a permanently broken upload.
           fail_ci_if_error: false
