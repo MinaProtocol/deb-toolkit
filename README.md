@@ -1,7 +1,7 @@
 # deb-toolkit
 
 [![CI](https://github.com/MinaProtocol/deb-toolkit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/MinaProtocol/deb-toolkit/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/MinaProtocol/deb-toolkit/branch/main/graph/badge.svg)](https://codecov.io/gh/MinaProtocol/deb-toolkit)
+[![Coverage Status](https://coveralls.io/repos/github/MinaProtocol/deb-toolkit/badge.svg?branch=main)](https://coveralls.io/github/MinaProtocol/deb-toolkit?branch=main)
 
 A small Rust CLI for building, signing, and verifying Debian packages.
 
