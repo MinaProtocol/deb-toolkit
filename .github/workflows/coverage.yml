@@ -1,8 +1,11 @@
 name: Coverage
 
-# The parent repo (mina-release-toolkit) lists deb-toolkit/ under `ignore`
-# in its own codecov.yml, on the stated assumption that this repo reports
-# coverage from its own CI. This workflow is what makes that true.
+# Reports to Coveralls rather than Codecov. Codecov requires an upload
+# token even for public repositories — tokenless uploads are accepted
+# only for PRs from forks — and both the repo-level and global tokens are
+# reachable only by a GitHub organization owner. Coveralls authenticates
+# with the GITHUB_TOKEN that Actions injects automatically, so this
+# workflow needs no secret provisioned and no org-level approval.
 
 on:
   pull_request:
@@ -57,29 +60,18 @@ jobs:
           cargo llvm-cov --all-features --workspace --lcov \
             --output-path lcov.info
 
-      # Codecov no longer accepts tokenless uploads: without a token it
-      # returns "Token required - not valid tokenless upload" for every
-      # request. Combined with `fail_ci_if_error: false` below, that would
-      # leave this job permanently green while publishing nothing — the
-      # exact state the sibling crates' coverage jobs in
-      # mina-release-toolkit have been in. Surface it as a warning
-      # annotation so a missing token is visible instead of silent.
-      - name: Warn if the Codecov token is missing
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        run: |
-          if [ -z "$CODECOV_TOKEN" ]; then
-            echo "::warning title=Coverage not published::CODECOV_TOKEN is not set in repository secrets. Codecov rejects tokenless uploads, so the report was generated but will not be published."
-          fi
-
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
+      - name: Upload to Coveralls
+        uses: coverallsapp/github-action@v2
         with:
-          files: lcov.info
-          flags: deb-toolkit
-          name: deb-toolkit
-          token: ${{ secrets.CODECOV_TOKEN }}
-          # Coverage is an observation, not a merge gate — a Codecov
-          # outage must not turn a PR red. The step above is what keeps
-          # that leniency from hiding a permanently broken upload.
-          fail_ci_if_error: false
+          file: lcov.info
+          format: lcov
+          # github-token defaults to ${{ github.token }}, which Actions
+          # provides automatically. Deliberately not set: Coveralls' docs
+          # are explicit that it must not be added to the secrets store.
+          #
+          # Coverage is an observation, not a merge gate, so a Coveralls
+          # outage must not turn a PR red. Unlike the Codecov setup this
+          # replaces, there is no permanent misconfiguration this can
+          # mask — with no token to omit, a failure here is a real
+          # incident rather than a missing secret.
+          fail-on-error: false
