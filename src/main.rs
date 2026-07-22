@@ -128,8 +128,14 @@ fn dispatch_session(cmd: SessionCommand) -> Result<()> {
             session.replace_suite(&args.new_suite)
         }
         SessionCommand::Reversion(args) => {
+            if args.update_deps {
+                log::warn!(
+                    "--update-deps is deprecated and ignored: reversion now always rewrites \
+                     versioned dependency constraints"
+                );
+            }
             let session = session::Session::load(&args.session_dir)?;
-            session.reversion(&args.new_version, args.update_deps)
+            session.reversion(&args.new_version)
         }
         SessionCommand::Apply(args) => {
             let session = session::Session::load(&args.session_dir)?;
