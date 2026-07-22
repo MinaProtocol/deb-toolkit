@@ -76,14 +76,19 @@ pub fn set_field(path: &Path, field: &str, value: &str) -> Result<()> {
 }
 
 /// Rewrite every dependency version constraint that pins exactly the
-/// `old_version` to instead reference `new_version`. Operates on the
-/// `Depends`, `Pre-Depends`, `Recommends`, `Suggests`, `Enhances`,
-/// `Breaks`, `Conflicts`, `Replaces`, and `Provides` fields. Matches the
-/// `--update-deps` flag in `deb-session-reversion.sh`.
+/// `old_version` to instead reference `new_version`, for any relation operator
+/// (`=`, `<<`, `<=`, `>=`, `>>`). Operates on the `Depends`, `Pre-Depends`,
+/// `Recommends`, `Suggests`, `Enhances`, `Breaks`, `Conflicts`, `Replaces`, and
+/// `Provides` fields, including multi-line continuations.
+///
+/// This is the unconditional dependency rewrite that `deb-session-reversion.sh`
+/// performs on every reversion (not only under its `--update-deps` flag): a
+/// reversion may lower the version, and a stale `(>= old)` would then be
+/// unsatisfiable. Constraint-scoped (only inside `(...)`), so a version-like
+/// substring in a package name is never mangled.
 pub fn update_deps(path: &Path, old_version: &str, new_version: &str) -> Result<()> {
     let text = fs::read_to_string(path).with_context(|| format!("Reading {}", path.display()))?;
 
-    // Operators recognized in a Debian version constraint: =, <<, <=, >=, >>
     let dep_fields = [
         "Depends",
         "Pre-Depends",
@@ -148,22 +153,33 @@ fn replace_version_in_constraints(line: &str, old: &str, new: &str) -> String {
     out
 }
 
+/// Debian version-relation operators, longest first so `<=`/`>=`/`<<`/`>>`
+/// are matched before a bare `=` could be mistaken for a prefix.
+const VERSION_OPERATORS: [&str; 5] = ["<<", "<=", ">=", ">>", "="];
+
 fn replace_in_constraint(inside: &str, old: &str, new: &str) -> String {
-    // Only exact `=` pins are rewritten — loose constraints like `>=` are
-    // still satisfied by the bumped version and intentionally left alone.
+    // Rewrite the pinned version for ANY relation operator (`=`, `<<`, `<=`,
+    // `>=`, `>>`) when it pins exactly `old`. This mirrors
+    // deb-session-reversion.sh, which rewrites the old version across every
+    // versioned constraint regardless of operator — necessary because a
+    // reversion may *lower* the version, and a left-alone `(>= old)` would then
+    // be unsatisfiable, making the package uninstallable.
+    //
+    // The operator and version may be separated by a space or not — mina emits
+    // both `(<< X)` and `(=X)` — so match the operator as a prefix rather than
+    // splitting on whitespace.
     let trimmed = inside.trim();
-    let Some((op, rest)) = trimmed.split_once(char::is_whitespace) else {
-        return inside.to_string();
-    };
-    let op = op.trim();
-    let ver = rest.trim();
-    if op != "=" {
-        return inside.to_string();
+    for op in VERSION_OPERATORS {
+        if let Some(rest) = trimmed.strip_prefix(op) {
+            if rest.trim() == old {
+                return format!("{} {}", op, new);
+            }
+            // Operator matched but a different version is pinned — leave it.
+            return inside.to_string();
+        }
     }
-    if ver != old {
-        return inside.to_string();
-    }
-    format!("{} {}", op, new)
+    // Not a version constraint (e.g. an architecture qualifier) — leave it.
+    inside.to_string()
 }
 
 #[cfg(test)]
@@ -229,16 +245,34 @@ mod tests {
     }
 
     #[test]
-    fn update_deps_rewrites_equality_only() {
+    fn update_deps_rewrites_all_operators() {
+        // Every relation operator pinning the old version is rewritten — a
+        // reversion may lower the version, so `>=`/`<<` cannot be left alone.
         let f = write_tmp(
-            "Package: foo\nVersion: 2.0\nDepends: libfoo (= 1.0), libbar (>= 1.0), libbaz\n",
+            "Package: foo\nVersion: 2.0\nDepends: a (= 1.0), b (>= 1.0), c (<< 1.0), d (<= 1.0), e (>> 1.0), f\n",
         );
         update_deps(f.path(), "1.0", "2.0").unwrap();
         let out = fs::read_to_string(f.path()).unwrap();
-        assert!(out.contains("libfoo (= 2.0)"), "got: {}", out);
-        // Loose constraint must NOT be rewritten — `>= 1.0` is still satisfied by 2.0.
-        assert!(out.contains("libbar (>= 1.0)"), "got: {}", out);
-        assert!(out.contains("libbaz"));
+        for expect in [
+            "a (= 2.0)",
+            "b (>= 2.0)",
+            "c (<< 2.0)",
+            "d (<= 2.0)",
+            "e (>> 2.0)",
+        ] {
+            assert!(out.contains(expect), "missing {expect} in: {out}");
+        }
+        assert!(out.contains(", f\n"), "unversioned dep dropped: {out}");
+    }
+
+    #[test]
+    fn update_deps_handles_operator_without_space() {
+        // mina emits `(=X)` with no space as well as `(<< X)`.
+        let f = write_tmp("Depends: cfg (=1.0), other (>=1.0)\n");
+        update_deps(f.path(), "1.0", "2.0.0-rc1").unwrap();
+        let out = fs::read_to_string(f.path()).unwrap();
+        assert!(out.contains("cfg (= 2.0.0-rc1)"), "got: {}", out);
+        assert!(out.contains("other (>= 2.0.0-rc1)"), "got: {}", out);
     }
 
     #[test]

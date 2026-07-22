@@ -135,14 +135,17 @@ fn session_full_roundtrip() {
         info
     );
     assert!(info.contains("Suite: stable"), "Suite not set:\n{}", info);
+    // Reversion rewrites the pinned version for EVERY relation operator, not
+    // just `=`: a reversion can lower the version, so a stale `(>= old)` would
+    // be unsatisfiable. Both constraints track the new version.
     assert!(
         info.contains("libfoo (= 2.0.0)"),
         "= pin not rewritten:\n{}",
         info
     );
     assert!(
-        info.contains("libbar (>= 1.0.0)"),
-        ">= constraint should have been left alone:\n{}",
+        info.contains("libbar (>= 2.0.0)"),
+        ">= constraint not rewritten:\n{}",
         info
     );
 

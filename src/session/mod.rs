@@ -116,11 +116,20 @@ impl Session {
         self.set_field("Suite", new_suite)
     }
 
-    pub fn reversion(&self, new_version: &str, update_deps: bool) -> Result<()> {
+    /// Set the `Version:` field and rewrite every versioned dependency
+    /// constraint that pinned the old version to the new one.
+    ///
+    /// The dependency rewrite is unconditional, matching
+    /// `deb-session-reversion.sh` (whose callers rely on it with no flag): a
+    /// reversion may lower the version, and a stale `(>= old)` constraint would
+    /// otherwise make the package uninstallable. See [`control::update_deps`].
+    pub fn reversion(&self, new_version: &str) -> Result<()> {
         let old_version = self.read_field("Version").ok();
         self.set_field("Version", new_version)?;
-        if update_deps {
-            if let Some(old) = old_version.as_deref() {
+        if let Some(old) = old_version.as_deref() {
+            // A no-op reversion (old == new) would rewrite nothing anyway, but
+            // skip the file rewrite entirely in that case.
+            if old != new_version {
                 control::update_deps(&self.control_file(), old, new_version)?;
             }
         }

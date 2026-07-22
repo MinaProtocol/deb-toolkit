@@ -144,8 +144,9 @@ pub struct SessionReplaceSuiteArgs {
 pub struct SessionReversionArgs {
     pub session_dir: String,
     pub new_version: String,
-    /// Also rewrite version constraints in Depends / Pre-Depends / etc.
-    #[arg(long = "update-deps", default_value_t = false)]
+    /// Deprecated and ignored: reversion now always rewrites versioned
+    /// dependency constraints. Accepted so existing invocations keep working.
+    #[arg(long = "update-deps", default_value_t = false, hide = true)]
     pub update_deps: bool,
 }
 

@@ -32,7 +32,7 @@ session save <session-dir> <output.deb> [--verify]
 session read-field    <session-dir> <field>
 session rename-package <session-dir> <new-name>
 session replace-suite  <session-dir> <new-suite>
-session reversion      <session-dir> <new-version> [--update-deps]
+session reversion      <session-dir> <new-version>
 session insert [-d]    <session-dir> <dest> <source>…
 session remove         <session-dir> <pattern>
 session move           <session-dir> <source> <destination>

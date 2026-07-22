@@ -95,23 +95,28 @@ CLI equivalent: `session replace-suite <session-dir> <new_suite>`
 
 ---
 
-### `reversion` — set `Version:`, optionally rewrite dep `=` pins
+### `reversion` — set `Version:` and rewrite versioned dep constraints
 
 ```json
-{ "op": "reversion", "new_version": "2.0.0", "update_deps": true }
+{ "op": "reversion", "new_version": "2.0.0" }
 ```
 
 | Field         | Type   | Required | Description                                                                                                                                |
 | ------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `new_version` | string | yes      | New value for the `Version:` field.                                                                                                        |
-| `update_deps` | bool   | no       | When `true`, rewrite `= <old_version>` to `= <new_version>` in `Depends`, `Pre-Depends`, `Recommends`, `Suggests`, `Enhances`, `Breaks`, `Conflicts`, `Replaces`, `Provides`. Defaults to `false`. |
+| `update_deps` | bool   | no       | Deprecated and ignored — the dependency rewrite below is now unconditional. Retained so older manifests keep parsing.                       |
 
-`update_deps` only rewrites exact-equality pins. Loose constraints
-(`>=`, `<<`, `<=`, `>>`) are left alone because they are still satisfied
-by the bumped version. This matches the `--update-deps` semantics of the
-bash `deb-session-reversion.sh` script.
+Reversion rewrites every dependency constraint that pinned the old version —
+for **any** relation operator (`=`, `<<`, `<=`, `>=`, `>>`) — across `Depends`,
+`Pre-Depends`, `Recommends`, `Suggests`, `Enhances`, `Breaks`, `Conflicts`,
+`Replaces`, `Provides`. All operators are rewritten, not just `=`, because a
+reversion can *lower* the version: a left-alone `(>= old)` would then be
+unsatisfiable and the package uninstallable. This matches the unconditional
+dependency rewrite the bash `deb-session-reversion.sh` performs on every call.
+The rewrite is constraint-scoped (only inside `(...)`), so a version-like
+substring in a package name is never mangled.
 
-CLI equivalent: `session reversion <session-dir> <new_version> [--update-deps]`
+CLI equivalent: `session reversion <session-dir> <new_version>`
 
 ---
 

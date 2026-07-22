@@ -137,17 +137,14 @@ pub enum Step {
         new_suite: String,
     },
 
-    /// `session reversion <new_version> [--update-deps]` — set the
-    /// `Version:` field, optionally rewriting `=` pins in dependency
-    /// fields that previously matched the *old* Version.
+    /// `session reversion <new_version>` — set the `Version:` field and rewrite
+    /// every versioned dependency constraint that pinned the old version, for
+    /// any operator (`=`, `<<`, `<=`, `>=`, `>>`).
     Reversion {
         /// New value for the `Version:` control field.
         new_version: String,
-        /// When true, rewrite `= <old_version>` to `= <new_version>` in
-        /// `Depends`, `Pre-Depends`, `Recommends`, `Suggests`, `Enhances`,
-        /// `Breaks`, `Conflicts`, `Replaces`, and `Provides`. Loose
-        /// constraints (`>=`, `<<`, …) are left alone since the bumped
-        /// version still satisfies the range.
+        /// Deprecated and ignored: the dependency rewrite is now unconditional.
+        /// Retained so manifests that still carry `update_deps` keep parsing.
         #[serde(default)]
         update_deps: bool,
     },
@@ -355,12 +352,8 @@ impl Step {
             Step::ReplaceSuite { new_suite } => format!("replace-suite → {}", new_suite),
             Step::Reversion {
                 new_version,
-                update_deps,
-            } => format!(
-                "reversion → {}{}",
-                new_version,
-                if *update_deps { " (--update-deps)" } else { "" }
-            ),
+                update_deps: _,
+            } => format!("reversion → {}", new_version),
             Step::Insert {
                 dest,
                 sources,
@@ -397,8 +390,8 @@ fn apply_step(session: &Session, step: &Step, manifest_dir: &Path) -> Result<()>
 
         Step::Reversion {
             new_version,
-            update_deps,
-        } => session.reversion(new_version, *update_deps),
+            update_deps: _,
+        } => session.reversion(new_version),
 
         Step::Insert {
             dest,
@@ -491,19 +484,15 @@ mod tests {
     }
 
     #[test]
-    fn reversion_defaults_to_no_update_deps() {
+    fn reversion_parses_without_update_deps() {
+        // The field is deprecated and ignored, but a manifest may omit it
+        // (serde default) or still carry it — both must parse.
         let json = r#"{ "steps": [
             { "op": "reversion", "new_version": "2.0" }
         ] }"#;
         let plan: Plan = serde_json::from_str(json).unwrap();
         match &plan.steps[0] {
-            Step::Reversion {
-                new_version,
-                update_deps,
-            } => {
-                assert_eq!(new_version, "2.0");
-                assert!(!*update_deps);
-            }
+            Step::Reversion { new_version, .. } => assert_eq!(new_version, "2.0"),
             _ => panic!("wrong variant"),
         }
     }
