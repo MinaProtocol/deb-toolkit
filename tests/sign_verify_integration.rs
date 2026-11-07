@@ -129,7 +129,7 @@ fn build_sign_verify_end_to_end() {
         .status()
         .expect("spawn build");
     assert!(status.success(), "build failed");
-    let deb = output_dir.join("example-app_1.0.0.deb");
+    let deb = output_dir.join("example-app_1.0.0_amd64.deb");
     assert!(deb.exists());
 
     // ---- import key (also makes debsigs use the test home) ----

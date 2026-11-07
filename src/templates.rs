@@ -52,6 +52,8 @@ pub struct DebianControl {
     pub package_name: String,
     pub version: String,
     pub vendor: String,
+    pub origin: String,
+    pub label: String,
     pub package_authors: String,
     pub package_maintainer: String,
     pub package_description: String,
@@ -69,6 +71,7 @@ pub struct DebianControl {
     pub pre_depends: Option<Vec<String>>,
     pub conflicts: Option<Vec<String>>,
     pub replaces: Option<Vec<String>>,
+    pub breaks: Option<Vec<String>>,
     pub provides: Option<Vec<String>>,
     pub license: String,
     pub githash: String,
@@ -83,9 +86,10 @@ struct Property<'a> {
 
 /// Appends an optional single-valued field, skipping it when blank.
 ///
-/// `Vendor` and `Authors` have no meaningful empty form — emitting a bare
-/// `Vendor:` would be a syntactically odd (and useless) control stanza — so a
-/// blank value means "caller did not set this" and the field is omitted.
+/// `Vendor`, `Origin`, `Label`, `Authors`, and `Source` have no meaningful empty
+/// form — emitting a bare `Vendor:` would be a syntactically odd (and useless)
+/// control stanza — so a blank value means "caller did not set this" and the
+/// field is omitted.
 fn push_scalar(props: &mut Vec<Property<'static>>, name: &'static str, value: &str) {
     if !value.trim().is_empty() {
         props.push(Property {
@@ -127,10 +131,8 @@ pub fn format_control_file(input: &DebianControl) -> Result<String> {
     env.add_template("control", DEBIAN_CONTROL_FILE_TEMPLATE)?;
     let tmpl = env.get_template("control")?;
 
-    // The twelve fields that were always emitted stay unconditional, blank or
-    // not, so packages built before this change keep byte-identical stanzas
-    // (`Installed-Size:` and `Source:` are routinely empty in practice).
-    // Everything added here is emitted only when the caller supplied it.
+    // These fields stay unconditional. Everything else is emitted only when the
+    // caller supplied it.
     let mut properties: Vec<Property> = vec![
         Property {
             name: "Package",
@@ -151,6 +153,8 @@ pub fn format_control_file(input: &DebianControl) -> Result<String> {
     ];
 
     push_scalar(&mut properties, "Vendor", &input.vendor);
+    push_scalar(&mut properties, "Origin", &input.origin);
+    push_scalar(&mut properties, "Label", &input.label);
     push_scalar(&mut properties, "Authors", &input.package_authors);
 
     properties.extend([
@@ -179,13 +183,12 @@ pub fn format_control_file(input: &DebianControl) -> Result<String> {
     push_list(&mut properties, "Suggests", &input.suggested_depends);
     push_list(&mut properties, "Conflicts", &input.conflicts);
     push_list(&mut properties, "Replaces", &input.replaces);
+    push_list(&mut properties, "Breaks", &input.breaks);
     push_list(&mut properties, "Provides", &input.provides);
 
+    push_scalar(&mut properties, "Source", &input.package_source);
+
     properties.extend([
-        Property {
-            name: "Source",
-            value: input.package_source.clone(),
-        },
         Property {
             name: "Suite",
             value: input.suite.clone(),
@@ -220,6 +223,8 @@ mod tests {
             package_name: "mina-daemon".into(),
             version: "1.2.3".into(),
             vendor: String::new(),
+            origin: String::new(),
+            label: String::new(),
             package_authors: String::new(),
             package_maintainer: "O(1)Labs <build@o1labs.org>".into(),
             package_description: "Mina daemon".into(),
@@ -237,6 +242,7 @@ mod tests {
             pre_depends: None,
             conflicts: None,
             replaces: None,
+            breaks: None,
             provides: None,
             license: "Apache-2.0".into(),
             githash: "abc1234".into(),
@@ -269,9 +275,13 @@ mod tests {
         input.suggested_depends = Some(vec!["d".into()]);
         input.conflicts = Some(vec!["e".into()]);
         input.replaces = Some(vec!["f".into()]);
+        input.breaks = Some(vec!["h".into()]);
         input.provides = Some(vec!["g".into()]);
         input.vendor = "O(1)Labs".into();
         input.package_authors = "Mina".into();
+        input.origin = "MinaProtocol".into();
+        input.label = "MinaLabel".into();
+        input.package_source = "mina".into();
 
         let out = format_control_file(&input).unwrap();
 
@@ -282,9 +292,13 @@ mod tests {
             ("Suggests", "d"),
             ("Conflicts", "e"),
             ("Replaces", "f"),
+            ("Breaks", "h"),
             ("Provides", "g"),
             ("Vendor", "O(1)Labs"),
             ("Authors", "Mina"),
+            ("Origin", "MinaProtocol"),
+            ("Label", "MinaLabel"),
+            ("Source", "mina"),
         ] {
             assert_eq!(
                 field(&out, name).as_deref(),
@@ -307,9 +321,13 @@ mod tests {
             "Suggests",
             "Conflicts",
             "Replaces",
+            "Breaks",
             "Provides",
             "Vendor",
             "Authors",
+            "Origin",
+            "Label",
+            "Source",
         ] {
             assert!(
                 !out.contains(&format!("{}:", name)),
@@ -344,8 +362,7 @@ mod tests {
         assert_eq!(field(&out, "Depends").as_deref(), Some("libssl3, libgmp10"));
     }
 
-    /// The twelve originally-emitted fields must keep appearing even when
-    /// blank, so existing packages keep byte-identical stanzas.
+    /// These fields must keep appearing, whatever the caller supplied.
     #[test]
     fn always_emits_the_original_fields() {
         let out = format_control_file(&bare()).unwrap();
@@ -359,7 +376,6 @@ mod tests {
             "Priority",
             "Homepage",
             "Installed-Size",
-            "Source",
             "Suite",
             "Codename",
             "License",

@@ -311,11 +311,20 @@ pub struct OptionalMetadataArgs {
     #[arg(long = "replaces")]
     pub replaces: Option<String>,
 
+    #[arg(long = "breaks")]
+    pub breaks: Option<String>,
+
     #[arg(long = "provides")]
     pub provides: Option<String>,
 
     #[arg(long = "vendor")]
     pub vendor: Option<String>,
+
+    #[arg(long = "origin")]
+    pub origin: Option<String>,
+
+    #[arg(long = "label")]
+    pub label: Option<String>,
 
     #[arg(long = "authors")]
     pub authors: Option<String>,

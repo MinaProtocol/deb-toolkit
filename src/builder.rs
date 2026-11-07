@@ -1,6 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
+use std::collections::HashSet;
+use std::os::unix::fs::MetadataExt;
+use std::path::Path;
 
 use crate::cli::{BuildArgs, OptionalMetadataArgs};
+use crate::deb_name::DebName;
 use crate::defaults::Defaults;
 use crate::templates::{format_control_file, DebianControl};
 
@@ -14,6 +18,8 @@ pub struct Input {
     pub package_name: String,
     pub version: String,
     pub vendor: String,
+    pub origin: String,
+    pub label: String,
     pub package_authors: String,
     pub package_maintainer: String,
     pub package_description: String,
@@ -31,6 +37,7 @@ pub struct Input {
     pub pre_depends: Option<Vec<String>>,
     pub conflicts: Option<Vec<String>>,
     pub replaces: Option<Vec<String>>,
+    pub breaks: Option<Vec<String>>,
     pub provides: Option<Vec<String>>,
     pub license: String,
     pub githash: String,
@@ -75,6 +82,12 @@ fn pick(
     })
 }
 
+/// Pick a value that may stay unset. The template decides what a blank value
+/// means for each field.
+fn pick_optional(cli: Option<String>, default: Option<String>) -> String {
+    cli.or(default).unwrap_or_default()
+}
+
 pub fn evaluate_and_validate(args: &BuildArgs) -> Result<Input> {
     let defaults = Defaults::load(args.defaults_file.as_deref())?;
 
@@ -94,15 +107,13 @@ pub fn evaluate_and_validate(args: &BuildArgs) -> Result<Input> {
     let pre_depends = merge_list(split_csv(&m.pre_depends), defaults.pre_depends);
     let conflicts = merge_list(split_csv(&m.conflicts), defaults.conflicts);
     let replaces = merge_list(split_csv(&m.replaces), defaults.replaces);
+    let breaks = merge_list(split_csv(&m.breaks), defaults.breaks);
     let provides = merge_list(split_csv(&m.provides), defaults.provides);
 
     let vendor = pick(m.vendor.clone(), defaults.vendor, "vendor", df)?;
-    let package_authors = pick(
-        m.authors.clone(),
-        defaults.package_authors,
-        "package_authors",
-        df,
-    )?;
+    let origin = pick_optional(m.origin.clone(), defaults.origin);
+    let label = pick_optional(m.label.clone(), defaults.label);
+    let package_authors = pick_optional(m.authors.clone(), defaults.package_authors);
     let package_maintainer = pick(
         m.maintainer.clone(),
         defaults.package_maintainer,
@@ -127,18 +138,9 @@ pub fn evaluate_and_validate(args: &BuildArgs) -> Result<Input> {
         "package_homepage",
         df,
     )?;
-    let package_installed_size = pick(
-        m.installed_size.clone(),
-        defaults.package_installed_size,
-        "package_installed_size",
-        df,
-    )?;
-    let package_source = pick(
-        m.source.clone(),
-        defaults.package_source,
-        "package_source",
-        df,
-    )?;
+    let package_installed_size =
+        pick_optional(m.installed_size.clone(), defaults.package_installed_size);
+    let package_source = pick_optional(m.source.clone(), defaults.package_source);
     let architecture = pick(
         m.architecture.clone(),
         defaults.architecture,
@@ -162,6 +164,8 @@ pub fn evaluate_and_validate(args: &BuildArgs) -> Result<Input> {
         package_name: args.package_name.clone(),
         version: args.version.clone(),
         vendor,
+        origin,
+        label,
         package_authors,
         package_maintainer,
         package_description,
@@ -179,6 +183,7 @@ pub fn evaluate_and_validate(args: &BuildArgs) -> Result<Input> {
         pre_depends,
         conflicts,
         replaces,
+        breaks,
         provides,
         license,
         githash,
@@ -187,11 +192,51 @@ pub fn evaluate_and_validate(args: &BuildArgs) -> Result<Input> {
     })
 }
 
+fn add_installed_size(
+    dir: &Path,
+    is_root: bool,
+    seen: &mut HashSet<(u64, u64)>,
+    total: &mut u64,
+) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if is_root && entry.file_name() == "DEBIAN" {
+            continue;
+        }
+        let meta = entry.path().symlink_metadata()?;
+        if meta.is_dir() {
+            *total += 1;
+            add_installed_size(&entry.path(), false, seen, total)?;
+        } else if !meta.is_file() && !meta.is_symlink() {
+            *total += 1;
+        } else if meta.nlink() == 1 || seen.insert((meta.dev(), meta.ino())) {
+            // A hard link adds no content, so count each inode once.
+            *total += meta.len().div_ceil(1024);
+        }
+    }
+    Ok(())
+}
+
+/// Compute `Installed-Size` in KiB, with the rule of `dpkg-gencontrol` 1.23: a
+/// file or symlink adds its size rounded up to 1 KiB, and any other object adds
+/// 1 KiB, the root directory included.
+///
+/// There is one exception: `dpkg-gencontrol` counts `DEBIAN`, and this does
+/// not, because the field describes what is installed.
+fn installed_size_kib(build_dir: &Path) -> Result<u64> {
+    let mut total = 1;
+    add_installed_size(build_dir, true, &mut HashSet::new(), &mut total)
+        .with_context(|| format!("Computing Installed-Size of {}", build_dir.display()))?;
+    Ok(total)
+}
+
 fn to_control(input: &Input) -> DebianControl {
     DebianControl {
         package_name: input.package_name.clone(),
         version: input.version.clone(),
         vendor: input.vendor.clone(),
+        origin: input.origin.clone(),
+        label: input.label.clone(),
         package_authors: input.package_authors.clone(),
         package_maintainer: input.package_maintainer.clone(),
         package_description: input.package_description.clone(),
@@ -209,6 +254,7 @@ fn to_control(input: &Input) -> DebianControl {
         pre_depends: input.pre_depends.clone(),
         conflicts: input.conflicts.clone(),
         replaces: input.replaces.clone(),
+        breaks: input.breaks.clone(),
         provides: input.provides.clone(),
         license: input.license.clone(),
         githash: input.githash.clone(),
@@ -217,10 +263,7 @@ fn to_control(input: &Input) -> DebianControl {
 }
 
 pub fn build_debian_package(input: &Input) -> Result<()> {
-    use std::path::Path;
     use std::process::Command;
-
-    let control_text = format_control_file(&to_control(input))?;
 
     let entries: Vec<_> = std::fs::read_dir(&input.build_dir)
         .map_err(|e| anyhow!("Failed to read build dir {}: {}", input.build_dir, e))?
@@ -228,6 +271,13 @@ pub fn build_debian_package(input: &Input) -> Result<()> {
     if entries.is_empty() {
         anyhow::bail!("Debian build directory is empty {}", input.build_dir);
     }
+
+    let mut control = to_control(input);
+    if control.package_installed_size.trim().is_empty() {
+        control.package_installed_size =
+            installed_size_kib(Path::new(&input.build_dir))?.to_string();
+    }
+    let control_text = format_control_file(&control)?;
 
     let control_dir = Path::new(&input.build_dir).join("DEBIAN");
     std::fs::create_dir_all(&control_dir)?;
@@ -237,7 +287,12 @@ pub fn build_debian_package(input: &Input) -> Result<()> {
     log::info!("Building debian package...");
     std::fs::create_dir_all(&input.output_dir)?;
 
-    let deb_name = format!("{}_{}.deb", input.package_name, input.version);
+    let deb_name = DebName {
+        package: &input.package_name,
+        version: &input.version,
+        architecture: Some(&input.architecture),
+    }
+    .to_string();
     let deb_output = format!("{}/{}", input.output_dir, deb_name);
 
     if input.debug {
@@ -275,4 +330,67 @@ pub fn build_debian_package(input: &Input) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    fn write(path: &Path, size: usize) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, vec![0u8; size]).unwrap();
+    }
+
+    fn size(root: &Path) -> u64 {
+        installed_size_kib(root).unwrap()
+    }
+
+    #[test]
+    fn a_file_size_rounds_up_to_one_kib() {
+        let cases = [(0, 0), (1, 1), (1024, 1), (1025, 2)];
+        for (bytes, kib) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            write(&dir.path().join("x"), bytes);
+            assert_eq!(size(dir.path()), 1 + kib, "{} bytes", bytes);
+        }
+    }
+
+    #[test]
+    fn each_directory_adds_one_kib() {
+        let dir = tempfile::tempdir().unwrap();
+        write(&dir.path().join("a/b/x"), 2048);
+        assert_eq!(size(dir.path()), 1 + 2 + 2);
+    }
+
+    #[test]
+    fn debian_directory_does_not_count() {
+        let dir = tempfile::tempdir().unwrap();
+        write(&dir.path().join("DEBIAN/control"), 4096);
+        write(&dir.path().join("x"), 1024);
+        assert_eq!(size(dir.path()), 1 + 1);
+    }
+
+    #[test]
+    fn only_the_top_level_debian_directory_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        write(&dir.path().join("usr/DEBIAN/x"), 1024);
+        assert_eq!(size(dir.path()), 1 + 2 + 1);
+    }
+
+    #[test]
+    fn a_hard_link_counts_once() {
+        let dir = tempfile::tempdir().unwrap();
+        write(&dir.path().join("x"), 2048);
+        std::fs::hard_link(dir.path().join("x"), dir.path().join("y")).unwrap();
+        assert_eq!(size(dir.path()), 1 + 2);
+    }
+
+    #[test]
+    fn a_symlink_counts_its_own_size_and_not_its_target() {
+        let dir = tempfile::tempdir().unwrap();
+        write(&dir.path().join("x"), 4096);
+        symlink("x", dir.path().join("y")).unwrap();
+        assert_eq!(size(dir.path()), 1 + 4 + 1);
+    }
 }

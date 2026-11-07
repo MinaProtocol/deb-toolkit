@@ -58,7 +58,7 @@ fn build_produces_deb() {
 
     assert!(status.success(), "build subcommand failed");
 
-    let deb = output_dir.join("example-app_1.0.0.deb");
+    let deb = output_dir.join("example-app_1.0.0_amd64.deb");
     assert!(deb.exists(), "expected .deb at {}", deb.display());
 
     // Sanity-check the produced .deb with dpkg-deb -I.

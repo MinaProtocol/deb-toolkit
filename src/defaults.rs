@@ -6,6 +6,8 @@ use std::path::Path;
 #[serde(default)]
 pub struct Defaults {
     pub vendor: Option<String>,
+    pub origin: Option<String>,
+    pub label: Option<String>,
     pub license: Option<String>,
     pub package_authors: Option<String>,
     pub package_maintainer: Option<String>,
@@ -22,6 +24,7 @@ pub struct Defaults {
     pub pre_depends: Option<Vec<String>>,
     pub conflicts: Option<Vec<String>>,
     pub replaces: Option<Vec<String>>,
+    pub breaks: Option<Vec<String>>,
     pub provides: Option<Vec<String>>,
     pub githash: Option<String>,
     pub buildurl: Option<String>,
