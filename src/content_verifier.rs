@@ -18,6 +18,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::cli::{OptionalMetadataArgs, VerifyContentArgs};
+use crate::deb_name::DebName;
 use crate::defaults::Defaults;
 use crate::misc::check_file_exists;
 
@@ -27,6 +28,8 @@ pub struct DpkgDebOutput {
     pub version: String,
     pub architecture: String,
     pub vendor: Option<String>,
+    pub origin: Option<String>,
+    pub label: Option<String>,
     pub authors: Option<String>,
     pub maintainer: Option<String>,
     pub description: Option<String>,
@@ -46,6 +49,7 @@ pub struct DpkgDebOutput {
     pub pre_depends: Vec<String>,
     pub conflicts: Vec<String>,
     pub replaces: Vec<String>,
+    pub breaks: Vec<String>,
     pub provides: Vec<String>,
 }
 
@@ -139,6 +143,8 @@ pub fn parse_dpkg_deb_output(text: &str) -> Result<DpkgDebOutput> {
         version,
         architecture,
         vendor: take("Vendor"),
+        origin: take("Origin"),
+        label: take("Label"),
         authors: take("Authors"),
         maintainer: take("Maintainer"),
         description,
@@ -158,6 +164,7 @@ pub fn parse_dpkg_deb_output(text: &str) -> Result<DpkgDebOutput> {
         pre_depends: split_list("Pre-Depends"),
         conflicts: split_list("Conflicts"),
         replaces: split_list("Replaces"),
+        breaks: split_list("Breaks"),
         provides: split_list("Provides"),
     })
 }
@@ -199,6 +206,9 @@ fn check_required(expected: &str, actual: &str, name: &str) -> Result<()> {
 fn check_optional(expected: Option<&str>, actual: Option<&str>, name: &str) -> Result<()> {
     match (expected, actual) {
         (None, _) => Ok(()),
+        // `build` omits a blank optional field, so a blank expected value and
+        // an absent field say the same thing.
+        (Some(e), None) if e.trim().is_empty() => Ok(()),
         (Some(_), None) => Err(anyhow!(
             "{} mismatch. Expected: {}, Actual: None",
             name,
@@ -264,16 +274,21 @@ pub fn verify(args: &VerifyContentArgs) -> Result<()> {
     let pre_depends = merge_list(split_csv(&m.pre_depends), defaults.pre_depends);
     let conflicts = merge_list(split_csv(&m.conflicts), defaults.conflicts);
     let replaces = merge_list(split_csv(&m.replaces), defaults.replaces);
+    let breaks = merge_list(split_csv(&m.breaks), defaults.breaks);
     let provides = merge_list(split_csv(&m.provides), defaults.provides);
 
     let vendor = first(m.vendor.clone(), defaults.vendor);
+    let origin = first(m.origin.clone(), defaults.origin);
+    let label = first(m.label.clone(), defaults.label);
     let authors = first(m.authors.clone(), defaults.package_authors);
     let maintainer = first(m.maintainer.clone(), defaults.package_maintainer);
     let description = first(m.description.clone(), defaults.package_description);
     let section = first(m.section.clone(), defaults.package_section);
     let priority = first(m.priority.clone(), defaults.package_priority);
     let homepage = first(m.homepage.clone(), defaults.package_homepage);
-    let installed_size = first(m.installed_size.clone(), defaults.package_installed_size);
+    // `build` computes a blank value, so blank here has nothing to compare.
+    let installed_size = first(m.installed_size.clone(), defaults.package_installed_size)
+        .filter(|size| !size.trim().is_empty());
     let source = first(m.source.clone(), defaults.package_source);
     let architecture = first(m.architecture.clone(), defaults.architecture);
     let license = first(m.license.clone(), defaults.license);
@@ -286,22 +301,20 @@ pub fn verify(args: &VerifyContentArgs) -> Result<()> {
         serde_json::to_string(&debug_repr(&deb_output)).unwrap_or_default()
     );
 
-    // Package + Version are derived from the .deb filename (mina convention:
-    // `<package>_<version>.deb`) and cross-checked against control fields.
+    // Package + Version (and Architecture, when the name has it) are derived
+    // from the .deb filename (mina convention: `<package>_<version>_<arch>.deb`)
+    // and cross-checked against control fields.
     let filename = Path::new(&args.deb)
         .file_name()
         .and_then(|s| s.to_str())
         .ok_or_else(|| anyhow!("Cannot derive filename from {}", args.deb))?;
-    let stem = filename.strip_suffix(".deb").unwrap_or(filename);
-    let (expected_pkg, expected_ver) = stem.split_once('_').ok_or_else(|| {
-        anyhow!(
-            "Filename {} is not in <package>_<version>.deb form",
-            filename
-        )
-    })?;
+    let expected = DebName::parse(filename)?;
 
-    check_required(expected_pkg, &deb_output.package_name, "Package")?;
-    check_required(expected_ver, &deb_output.version, "Version")?;
+    check_required(expected.package, &deb_output.package_name, "Package")?;
+    check_required(expected.version, &deb_output.version, "Version")?;
+    if let Some(architecture) = expected.architecture {
+        check_required(architecture, &deb_output.architecture, "Architecture")?;
+    }
 
     check_optional(
         architecture.as_deref(),
@@ -309,6 +322,8 @@ pub fn verify(args: &VerifyContentArgs) -> Result<()> {
         "Architecture",
     )?;
     check_optional(vendor.as_deref(), deb_output.vendor.as_deref(), "Vendor")?;
+    check_optional(origin.as_deref(), deb_output.origin.as_deref(), "Origin")?;
+    check_optional(label.as_deref(), deb_output.label.as_deref(), "Label")?;
     check_optional(authors.as_deref(), deb_output.authors.as_deref(), "Authors")?;
     check_optional(
         maintainer.as_deref(),
@@ -365,6 +380,7 @@ pub fn verify(args: &VerifyContentArgs) -> Result<()> {
     check_list(&pre_depends, &deb_output.pre_depends, "Pre-Depends")?;
     check_list(&conflicts, &deb_output.conflicts, "Conflicts")?;
     check_list(&replaces, &deb_output.replaces, "Replaces")?;
+    check_list(&breaks, &deb_output.breaks, "Breaks")?;
     check_list(&provides, &deb_output.provides, "Provides")?;
 
     Ok(())
@@ -378,6 +394,8 @@ fn debug_repr(o: &DpkgDebOutput) -> serde_json::Value {
         "version": o.version,
         "architecture": o.architecture,
         "vendor": o.vendor,
+        "origin": o.origin,
+        "label": o.label,
         "authors": o.authors,
         "maintainer": o.maintainer,
         "description": o.description,
@@ -397,6 +415,7 @@ fn debug_repr(o: &DpkgDebOutput) -> serde_json::Value {
         "pre_depends": o.pre_depends,
         "conflicts": o.conflicts,
         "replaces": o.replaces,
+        "breaks": o.breaks,
         "provides": o.provides,
     })
 }
@@ -404,6 +423,27 @@ fn debug_repr(o: &DpkgDebOutput) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_blank_expected_value_matches_an_absent_field() {
+        assert!(check_optional(Some(""), None, "Source").is_ok());
+        assert!(check_optional(Some("  "), None, "Source").is_ok());
+        assert!(check_optional(Some("mina"), None, "Source").is_err());
+        assert!(check_optional(Some(""), Some("mina"), "Source").is_err());
+    }
+
+    #[test]
+    fn reads_origin_label_and_breaks() {
+        let out = parse_dpkg_deb_output(
+            " Package: a\n Version: 1\n Architecture: all\n Origin: MinaProtocol\n \
+             Label: MinaLabel\n Breaks: old (<< 1), older\n",
+        )
+        .unwrap();
+
+        assert_eq!(out.origin.as_deref(), Some("MinaProtocol"));
+        assert_eq!(out.label.as_deref(), Some("MinaLabel"));
+        assert_eq!(out.breaks, vec!["old (<< 1)", "older"]);
+    }
 
     const SAMPLE_DPKG_DEB_I: &str = r#" new Debian package, version 2.0.
  size 123456 bytes: control archive=789 bytes.

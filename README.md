@@ -71,17 +71,25 @@ are skipped (with a printed note) on systems without them.
 ## Control fields
 
 `build` writes `Package`, `Version`, `Architecture`, `Maintainer`, `Section`,
-`Priority`, `Homepage`, `Installed-Size`, `Source`, `Suite`, `Codename`,
-`License`, and `Description` unconditionally, plus these when supplied:
-`Vendor`, `Authors`, `Depends`, `Pre-Depends`, `Recommends`, `Suggests`,
-`Conflicts`, `Replaces`, `Provides`.
+`Priority`, `Homepage`, `Installed-Size`, `Suite`, `Codename`, `License`, and
+`Description` unconditionally, plus these when supplied: `Vendor`, `Origin`,
+`Label`, `Authors`, `Source`, `Depends`, `Pre-Depends`, `Recommends`,
+`Suggests`, `Conflicts`, `Replaces`, `Breaks`, `Provides`.
 
 The optional fields are omitted entirely when unset or empty, rather than
 emitted with a blank value. Relationship fields are joined with `", "`.
 
-## Known limitation
+When `Installed-Size` is unset or blank, `build` computes it from the build
+directory, with the rule of `dpkg-gencontrol`: a file or symlink adds its size
+rounded up to 1 KiB, and any other object adds 1 KiB. Unlike `dpkg-gencontrol`,
+it does not count `DEBIAN`, because `DEBIAN` is not installed.
 
-`Origin`, `Label`, and `Breaks` are not modelled and cannot be set.
+## Output file name
+
+`build` writes `<output-dir>/<package>_<version>_<architecture>.deb`.
+`verify content` accepts this name and the older
+`<package>_<version>.deb`. When the name has an architecture, it must match
+the `Architecture` field.
 
 ## License
 
