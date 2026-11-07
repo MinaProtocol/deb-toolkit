@@ -15,6 +15,7 @@ deb-toolkit verify content --deb …  [+ optional metadata]
 deb-toolkit verify signature <deb> [--key <path|url>]
 deb-toolkit lookup sign-key <deb>
 deb-toolkit session <verb> …          (transactional .deb modification)
+deb-toolkit diff <old.deb> <new.deb>  (compare what two packages install)
 ```
 
 Run `deb-toolkit <subcommand> --help` for the full flag list.
@@ -46,6 +47,34 @@ mode** via `session apply` — see
 [`docs/session-manifest.md`](docs/session-manifest.md) for the schema
 reference and [`examples/manifests/`](examples/manifests/) for worked
 examples (including a complete variant-rebrand bundle).
+
+## Diff
+
+`deb-toolkit diff` compares two packages by what they install. Use it to prove
+that a new build path gives the same package as the old one:
+
+```
+deb-toolkit diff old.deb new.deb
+deb-toolkit diff old.deb new.deb --ignore-field Installed-Size --ignore-path '/usr/share/doc/*'
+deb-toolkit diff old.deb new.deb --json
+```
+
+| Compared | Rule |
+| --- | --- |
+| Control fields | Field names are case-insensitive. `Depends`, `Pre-Depends`, `Recommends`, `Suggests`, `Enhances`, `Breaks`, `Conflicts`, `Replaces` and `Provides` compare as sets, so order and spacing do not matter |
+| Control files | Byte compare. Text files show a unified diff |
+| Installed paths | Type, SHA-256 of the content, link target, mode and owner. A missing owner name is not a difference when the numeric owner matches, because dpkg then uses the number |
+
+- **Notes:** compression, signatures and the format version are shown, but they
+  do not count as differences. They do not change what a user installs.
+- **Timestamps:** two builds always differ in time. Use `--compare-mtime` to
+  compare them.
+- **The root entry:** the `./` tar entry is skipped, because no package installs
+  it, and `session save` does not write it.
+
+Exit status: `0` when the packages match, `1` when they differ, `2` on an error.
+Packages are streamed and hashed, not extracted, so a large package needs no
+disk space and little memory.
 
 ## Build
 

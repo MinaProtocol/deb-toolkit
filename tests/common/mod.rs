@@ -17,6 +17,7 @@
 #![allow(dead_code)] // tests pick and choose; not every helper is used by every file
 
 use std::ffi::OsStr;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -296,6 +297,10 @@ pub struct DebFixture {
     suite: Option<String>,
     depends: Option<String>,
     files: Vec<(String, Vec<u8>)>,
+    symlinks: Vec<(String, String)>,
+    control_files: Vec<(String, Vec<u8>)>,
+    modes: Vec<(String, u32)>,
+    compression: String,
 }
 
 impl DebFixture {
@@ -309,6 +314,10 @@ impl DebFixture {
             suite: None,
             depends: None,
             files: Vec::new(),
+            symlinks: Vec::new(),
+            control_files: Vec::new(),
+            modes: Vec::new(),
+            compression: "gzip".into(),
         }
     }
 
@@ -348,7 +357,31 @@ impl DebFixture {
         self
     }
 
-    /// Build the .deb at `out_path` using `dpkg-deb -Zgzip --build`.
+    /// Add a symlink at `pkg_path` that points to `target`.
+    pub fn symlink(mut self, pkg_path: &str, target: &str) -> Self {
+        self.symlinks.push((pkg_path.into(), target.into()));
+        self
+    }
+
+    /// Add a member to `DEBIAN/`, for example `postinst`.
+    pub fn control_file(mut self, name: &str, content: impl Into<Vec<u8>>) -> Self {
+        self.control_files.push((name.into(), content.into()));
+        self
+    }
+
+    /// Set the mode of a file that was added with [`Self::file`].
+    pub fn mode(mut self, pkg_path: &str, mode: u32) -> Self {
+        self.modes.push((pkg_path.into(), mode));
+        self
+    }
+
+    /// Set the `dpkg-deb -Z` compression. The default is `gzip`.
+    pub fn compression(mut self, compression: &str) -> Self {
+        self.compression = compression.into();
+        self
+    }
+
+    /// Build the .deb at `out_path` using `dpkg-deb --build`.
     /// Panics on any failure — these are tests, so a precise panic
     /// message is more useful than an opaque Result chain.
     pub fn build(self, out_path: &Path) -> PathBuf {
@@ -381,8 +414,27 @@ impl DebFixture {
             std::fs::write(&abs, content).unwrap();
         }
 
+        for (pkg_path, target) in &self.symlinks {
+            let abs = pkg_root.join(pkg_path.trim_start_matches('/'));
+            std::fs::create_dir_all(abs.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(target, abs).unwrap();
+        }
+
+        for (name, content) in &self.control_files {
+            let abs = pkg_root.join("DEBIAN").join(name);
+            std::fs::write(&abs, content).unwrap();
+            let executable = std::fs::Permissions::from_mode(0o755);
+            std::fs::set_permissions(&abs, executable).unwrap();
+        }
+
+        for (pkg_path, mode) in &self.modes {
+            let abs = pkg_root.join(pkg_path.trim_start_matches('/'));
+            std::fs::set_permissions(abs, std::fs::Permissions::from_mode(*mode)).unwrap();
+        }
+
         let out = Command::new("dpkg-deb")
-            .args(["-Zgzip", "--build"])
+            .arg(format!("-Z{}", self.compression))
+            .args(["--root-owner-group", "--build"])
             .arg(&pkg_root)
             .arg(out_path)
             .output()
