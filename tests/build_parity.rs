@@ -511,3 +511,33 @@ fn installed_size_is_computed_unless_a_value_is_given() {
     assert!(verify(&deb, &["--installed-size", "1234"]).status.success());
     assert!(!verify(&deb, &["--installed-size", "99"]).status.success());
 }
+
+/// The same comparison through `deb-toolkit diff`, as a migration runs it.
+#[test]
+fn diff_passes_for_each_control_shape() {
+    skip_unless!("dpkg-deb");
+    skip_unless!("fakeroot");
+
+    for (name, control) in shapes() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = bash_build(dir.path(), &bash_stanza(&control));
+        let mut flags = fixed_flags();
+        flags.extend(relation_flags(&control));
+        let new = toolkit_build(dir.path(), &flags);
+
+        let output = Command::new(BIN)
+            .arg("diff")
+            .arg(&old)
+            .arg(&new)
+            .args(["--ignore-field", "Installed-Size"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}:\n{}",
+            name,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

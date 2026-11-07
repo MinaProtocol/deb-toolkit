@@ -32,6 +32,8 @@ pub enum Command {
         #[command(subcommand)]
         subcommand: SessionCommand,
     },
+    /// Compare two .deb files by what they install
+    Diff(DiffArgs),
 }
 
 /// Verbs accepted under `deb-toolkit session …`. Mirror the bash
@@ -178,6 +180,33 @@ pub enum LookupCommand {
     /// Print the signing-key id embedded in a .deb
     #[command(name = "sign-key")]
     SignKey(LookupSignKeyArgs),
+}
+
+#[derive(Args, Debug)]
+#[command(after_help = "Exit status: 0 when the packages match, 1 when they differ, 2 on error.")]
+pub struct DiffArgs {
+    /// Path to the reference .deb
+    pub old: String,
+
+    /// Path to the .deb to compare with the reference
+    pub new: String,
+
+    /// Control field to skip. Case-insensitive. Repeat for more fields.
+    #[arg(long = "ignore-field", value_name = "FIELD")]
+    pub ignore_fields: Vec<String>,
+
+    /// Glob of installed paths to skip, for example `/usr/share/doc/*`.
+    /// `*` also matches `/`. Repeat for more patterns.
+    #[arg(long = "ignore-path", value_name = "GLOB")]
+    pub ignore_paths: Vec<String>,
+
+    /// Also compare file modification times
+    #[arg(long = "compare-mtime", default_value_t = false)]
+    pub compare_mtime: bool,
+
+    /// Print the report as JSON
+    #[arg(long = "json", default_value_t = false)]
+    pub json: bool,
 }
 
 #[derive(Args, Debug)]

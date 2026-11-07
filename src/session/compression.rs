@@ -55,25 +55,20 @@ impl Compression {
         }
     }
 
+    /// Wrap `input` in a streaming decompressor for this format.
+    pub fn reader<'a>(&self, input: impl Read + 'a) -> Result<Box<dyn Read + 'a>> {
+        Ok(match self {
+            Compression::None => Box::new(input),
+            Compression::Gzip => Box::new(flate2::read::GzDecoder::new(input)),
+            Compression::Xz => Box::new(xz2::read::XzDecoder::new(input)),
+            Compression::Zstd => Box::new(zstd::stream::Decoder::new(input)?),
+        })
+    }
+
     /// Decompress `input` and write the raw tar bytes to `output`.
-    pub fn decompress(&self, mut input: impl Read, output: &mut impl Write) -> Result<()> {
-        match self {
-            Compression::None => {
-                std::io::copy(&mut input, output)?;
-            }
-            Compression::Gzip => {
-                let mut dec = flate2::read::GzDecoder::new(input);
-                std::io::copy(&mut dec, output)?;
-            }
-            Compression::Xz => {
-                let mut dec = xz2::read::XzDecoder::new(input);
-                std::io::copy(&mut dec, output)?;
-            }
-            Compression::Zstd => {
-                let mut dec = zstd::stream::Decoder::new(input)?;
-                std::io::copy(&mut dec, output)?;
-            }
-        }
+    pub fn decompress(&self, input: impl Read, output: &mut impl Write) -> Result<()> {
+        let mut decoder = self.reader(input)?;
+        std::io::copy(&mut decoder, output)?;
         Ok(())
     }
 

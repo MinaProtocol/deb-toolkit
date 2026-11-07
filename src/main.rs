@@ -4,7 +4,7 @@ use clap::Parser;
 use deb_toolkit::builder::{build_debian_package, evaluate_and_validate};
 use deb_toolkit::cli::{Cli, Command, LookupCommand, SessionCommand, VerifyCommand};
 use deb_toolkit::session;
-use deb_toolkit::{content_verifier, signature_verifier, signer, viewer};
+use deb_toolkit::{content_verifier, diff, signature_verifier, signer, viewer};
 use std::path::PathBuf;
 
 fn init_logging(debug: bool) {
@@ -71,6 +71,18 @@ fn dispatch(cli: Cli) -> Result<()> {
         Command::Session { subcommand } => {
             init_logging(false);
             dispatch_session(subcommand)
+        }
+        Command::Diff(args) => {
+            init_logging(false);
+            // Follow diff(1): 1 means "they differ", so an error needs its own code.
+            match diff::run(&args) {
+                Ok(true) => Ok(()),
+                Ok(false) => std::process::exit(1),
+                Err(err) => {
+                    log::error!("{:#}", err);
+                    std::process::exit(2);
+                }
+            }
         }
     }
 }
