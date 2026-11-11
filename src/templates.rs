@@ -188,11 +188,9 @@ pub fn format_control_file(input: &DebianControl) -> Result<String> {
 
     push_scalar(&mut properties, "Source", &input.package_source);
 
+    push_scalar(&mut properties, "Suite", &input.suite);
+
     properties.extend([
-        Property {
-            name: "Suite",
-            value: input.suite.clone(),
-        },
         Property {
             name: "Codename",
             value: input.codename.clone(),
@@ -254,6 +252,21 @@ mod tests {
         out.lines()
             .find(|l| l.starts_with(&format!("{}: ", name)) || l.trim_end() == format!("{}:", name))
             .map(|l| l[name.len() + 1..].trim().to_string())
+    }
+
+    #[test]
+    fn writes_suite_only_when_given() {
+        let mut input = bare();
+        assert_eq!(
+            field(&format_control_file(&input).unwrap(), "Suite").as_deref(),
+            Some("stable")
+        );
+
+        for blank in ["", "  "] {
+            input.suite = blank.into();
+            let out = format_control_file(&input).unwrap();
+            assert_eq!(field(&out, "Suite"), None, "blank {blank:?} gave:\n{out}");
+        }
     }
 
     #[test]
@@ -376,7 +389,6 @@ mod tests {
             "Priority",
             "Homepage",
             "Installed-Size",
-            "Suite",
             "Codename",
             "License",
         ] {
