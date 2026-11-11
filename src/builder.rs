@@ -265,13 +265,8 @@ fn to_control(input: &Input) -> DebianControl {
 pub fn build_debian_package(input: &Input) -> Result<()> {
     use std::process::Command;
 
-    let entries: Vec<_> = std::fs::read_dir(&input.build_dir)
-        .map_err(|e| anyhow!("Failed to read build dir {}: {}", input.build_dir, e))?
-        .collect();
-    if entries.is_empty() {
-        anyhow::bail!("Debian build directory is empty {}", input.build_dir);
-    }
-
+    // A build directory with no files is valid: it gives a metapackage, which
+    // has only control fields (for example Depends).
     let mut control = to_control(input);
     if control.package_installed_size.trim().is_empty() {
         control.package_installed_size =

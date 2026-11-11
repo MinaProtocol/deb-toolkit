@@ -55,16 +55,26 @@ fn bash_stanza(c: &Control) -> String {
     out
 }
 
-fn stage(dir: &Path) {
-    let bin = dir.join("usr/local/bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    std::fs::write(bin.join("tool"), b"binary\n").unwrap();
+/// The files of the package. A metapackage has none.
+#[derive(Clone, Copy)]
+enum Files {
+    Some,
+    None,
+}
+
+fn stage(dir: &Path, files: Files) {
+    std::fs::create_dir_all(dir).unwrap();
+    if let Files::Some = files {
+        let bin = dir.join("usr/local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("tool"), b"binary\n").unwrap();
+    }
 }
 
 /// `fakeroot dpkg-deb -Zgzip --build`, as in `build_deb`.
-fn bash_build(root: &Path, stanza: &str) -> PathBuf {
+fn bash_build(root: &Path, stanza: &str, files: Files) -> PathBuf {
     let tree = root.join("bash-tree");
-    stage(&tree);
+    stage(&tree, files);
     std::fs::create_dir_all(tree.join("DEBIAN")).unwrap();
     std::fs::write(tree.join("DEBIAN/control"), stanza).unwrap();
 
@@ -116,9 +126,9 @@ fn relation_flags(c: &Control) -> Vec<String> {
     .collect()
 }
 
-fn toolkit_build(root: &Path, flags: &[String]) -> PathBuf {
+fn toolkit_build(root: &Path, flags: &[String], files: Files) -> PathBuf {
     let tree = root.join("toolkit-tree");
-    stage(&tree);
+    stage(&tree, files);
     let out = root.join("out");
 
     let output = Command::new(BIN)
@@ -259,13 +269,44 @@ fn build_matches_the_bash_builder_for_each_control_shape() {
 
     for (name, control) in shapes() {
         let dir = tempfile::tempdir().unwrap();
-        let old = bash_build(dir.path(), &bash_stanza(&control));
+        let old = bash_build(dir.path(), &bash_stanza(&control), Files::Some);
         let mut flags = fixed_flags();
         flags.extend(relation_flags(&control));
-        let new = toolkit_build(dir.path(), &flags);
+        let new = toolkit_build(dir.path(), &flags, Files::Some);
 
         assert_eq!(fields(&old), fields(&new), "{}", name);
     }
+}
+
+/// A metapackage (a package with no files, only control fields) is built by
+/// the bash builder for the network and automode packages.
+#[test]
+fn build_matches_the_bash_builder_for_a_metapackage() {
+    skip_unless!("dpkg-deb");
+    skip_unless!("fakeroot");
+
+    let control = Control {
+        depends: "mina-devnet-config (=3.1.0-abc1234), mina-devnet-profile",
+        ..Default::default()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let old = bash_build(dir.path(), &bash_stanza(&control), Files::None);
+    let mut flags = fixed_flags();
+    flags.extend(relation_flags(&control));
+    let new = toolkit_build(dir.path(), &flags, Files::None);
+
+    assert_eq!(fields(&old), fields(&new));
+    let contents = Command::new("dpkg-deb")
+        .arg("-c")
+        .arg(&new)
+        .output()
+        .unwrap();
+    assert!(contents.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&contents.stdout).lines().count(),
+        1,
+        "only the root directory"
+    );
 }
 
 /// The parity test above is worth nothing if it cannot see these fields.
@@ -288,8 +329,8 @@ fn each_flag_is_needed_for_parity() {
         flags.drain(at..at + 2);
 
         let dir = tempfile::tempdir().unwrap();
-        let old = bash_build(dir.path(), &bash_stanza(&control));
-        let new = toolkit_build(dir.path(), &flags);
+        let old = bash_build(dir.path(), &bash_stanza(&control), Files::Some);
+        let new = toolkit_build(dir.path(), &flags, Files::Some);
 
         assert_ne!(fields(&old), fields(&new), "without {}", flag);
     }
@@ -307,7 +348,7 @@ fn verify_content_accepts_the_output_of_build() {
     let mut flags = fixed_flags();
     flags.extend(relation_flags(&control));
     let dir = tempfile::tempdir().unwrap();
-    let deb = toolkit_build(dir.path(), &flags);
+    let deb = toolkit_build(dir.path(), &flags, Files::Some);
 
     let good = [
         "--architecture",
@@ -342,7 +383,7 @@ fn verify_content_accepts_blank_defaults_for_omitted_fields() {
     skip_unless!("fakeroot");
 
     let dir = tempfile::tempdir().unwrap();
-    let deb = toolkit_build(dir.path(), &fixed_flags());
+    let deb = toolkit_build(dir.path(), &fixed_flags(), Files::Some);
     let defaults = dir.path().join("defaults.json");
     std::fs::write(
         &defaults,
@@ -370,7 +411,7 @@ fn verify_content_checks_the_architecture_in_the_file_name() {
     skip_unless!("fakeroot");
 
     let dir = tempfile::tempdir().unwrap();
-    let deb = toolkit_build(dir.path(), &fixed_flags());
+    let deb = toolkit_build(dir.path(), &fixed_flags(), Files::Some);
 
     let renamed = dir.path().join(format!("{PACKAGE}_{VERSION}_arm64.deb"));
     std::fs::copy(&deb, &renamed).unwrap();
@@ -417,8 +458,8 @@ fn origin_label_and_breaks_work_from_a_defaults_file() {
         defaults.to_str().unwrap().to_string(),
     ]);
 
-    let old = bash_build(dir.path(), &bash_stanza(&control));
-    let new = toolkit_build(dir.path(), &with_defaults);
+    let old = bash_build(dir.path(), &bash_stanza(&control), Files::Some);
+    let new = toolkit_build(dir.path(), &with_defaults, Files::Some);
     assert_eq!(fields(&old), fields(&new));
 
     let args = ["--defaults-file", defaults.to_str().unwrap()];
@@ -435,7 +476,7 @@ fn origin_label_and_breaks_work_from_a_defaults_file() {
 
         let plain = dir.path().join("plain");
         std::fs::create_dir_all(&plain).unwrap();
-        let bare = toolkit_build(&plain, &flags);
+        let bare = toolkit_build(&plain, &flags, Files::Some);
         let args = ["--defaults-file", one.to_str().unwrap()];
         assert!(!verify(&bare, &args).status.success(), "{}", field);
         std::fs::remove_dir_all(&plain).unwrap();
@@ -451,20 +492,20 @@ fn installed_size_is_computed_unless_a_value_is_given() {
     let computed = "5";
 
     let dir = tempfile::tempdir().unwrap();
-    let deb = toolkit_build(dir.path(), &fixed_flags());
+    let deb = toolkit_build(dir.path(), &fixed_flags(), Files::Some);
     assert_eq!(field(&deb, "Installed-Size"), computed);
 
     // A blank value means unset, as in `packaging/defaults/toolkit.json`.
     let dir = tempfile::tempdir().unwrap();
     let mut flags = fixed_flags();
     flags.extend(["--installed-size".to_string(), String::new()]);
-    let deb = toolkit_build(dir.path(), &flags);
+    let deb = toolkit_build(dir.path(), &flags, Files::Some);
     assert_eq!(field(&deb, "Installed-Size"), computed);
 
     let dir = tempfile::tempdir().unwrap();
     let mut flags = fixed_flags();
     flags.extend(["--installed-size".to_string(), "1234".to_string()]);
-    let deb = toolkit_build(dir.path(), &flags);
+    let deb = toolkit_build(dir.path(), &flags, Files::Some);
     assert_eq!(field(&deb, "Installed-Size"), "1234");
 
     assert!(verify(&deb, &["--installed-size", "1234"]).status.success());
