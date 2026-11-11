@@ -206,8 +206,11 @@ pub struct BuildArgs {
     #[arg(long = "version")]
     pub version: String,
 
-    /// Suite of the debian package (release/stable/unstable/...)
-    #[arg(long = "suite")]
+    /// Suite field (release/stable/unstable/...). Optional, and the field is
+    /// left out when it is not given. `Suite` belongs in the Release file of
+    /// a repository: a package that names its channel must be rewritten each
+    /// time it moves to another channel.
+    #[arg(long = "suite", default_value = "")]
     pub suite: String,
 
     /// Codename of the debian package (focal/bullseye/...)

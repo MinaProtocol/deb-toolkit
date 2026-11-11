@@ -9,7 +9,7 @@ A small Rust CLI for building, signing, and verifying Debian packages.
 
 ```
 deb-toolkit build         --build-dir … --output-dir … --package-name … --version … \
-                          --suite … --codename …   [+ optional metadata]
+                          --codename …   [+ optional metadata]
 deb-toolkit sign          --deb … --key …
 deb-toolkit verify content --deb …  [+ optional metadata]
 deb-toolkit verify signature <deb> [--key <path|url>]
@@ -71,10 +71,15 @@ are skipped (with a printed note) on systems without them.
 ## Control fields
 
 `build` writes `Package`, `Version`, `Architecture`, `Maintainer`, `Section`,
-`Priority`, `Homepage`, `Installed-Size`, `Suite`, `Codename`, `License`, and
+`Priority`, `Homepage`, `Installed-Size`, `Codename`, `License`, and
 `Description` unconditionally, plus these when supplied: `Vendor`, `Origin`,
-`Label`, `Authors`, `Source`, `Depends`, `Pre-Depends`, `Recommends`,
+`Label`, `Authors`, `Source`, `Suite`, `Depends`, `Pre-Depends`, `Recommends`,
 `Suggests`, `Conflicts`, `Replaces`, `Breaks`, `Provides`.
+
+`Suite` is optional because it is a field of the Release file of a repository,
+not of a package. A package that names its channel must be rewritten, with a
+new checksum, each time it moves to another channel. Without the field, the
+same `.deb` can be published to any channel unchanged.
 
 The optional fields are omitted entirely when unset or empty, rather than
 emitted with a blank value. Relationship fields are joined with `", "`.

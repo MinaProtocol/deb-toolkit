@@ -33,7 +33,7 @@ fn bash_stanza(c: &Control) -> String {
     let mut out = format!(
         "Package: {PACKAGE}\nVersion: {VERSION}\nLicense: Apache-2.0\n\
          Origin: MinaProtocol\nLabel: MinaProtocol\nVendor: O(1)Labs\n\
-         Codename: bullseye\nSuite: unstable\nArchitecture: amd64\n\
+         Codename: bullseye\nArchitecture: amd64\n\
          Maintainer: O(1)Labs <build@o1labs.org>\nInstalled-Size:\n"
     );
     for (name, value) in [
@@ -128,7 +128,7 @@ fn toolkit_build(root: &Path, flags: &[String]) -> PathBuf {
         .arg("--output-dir")
         .arg(&out)
         .args(["--package-name", PACKAGE, "--version", VERSION])
-        .args(["--suite", "unstable", "--codename", "bullseye"])
+        .args(["--codename", "bullseye"])
         .args(flags)
         .output()
         .unwrap();
